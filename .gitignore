@@ -1,5 +1,6 @@
 # App Secret
 src/credentials.js
+src/config.js
 
 # Logs
 logs

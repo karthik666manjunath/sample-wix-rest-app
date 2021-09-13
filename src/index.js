@@ -4,7 +4,8 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const path = require('path');
 const config = require('./config');
-const credentials = require('./credentials')
+const credentials = require('./credentials');
+const mysql = require('mysql');
 
 const APP_ID = config.APP_ID;
 const APP_SECRET = credentials.APP_SECRET;
@@ -16,7 +17,7 @@ const STORE_ORDERS_API_URL = 'https://www.wixapis.com/stores/v2';
 const PAYMENTS_API_URL = 'https://cashier.wix.com/_api/payment-services-web/merchant/v2';
 
 const app = express();
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 5000;
 const incomingWebhooks = [];
 
 app.use(bodyParser.urlencoded({extended: false}));
@@ -24,6 +25,16 @@ app.use(bodyParser.text());
 app.use(bodyParser.json());
 app.set('view engine', 'pug');
 app.use(express.static(path.join(__dirname, 'statics')));
+
+//Prod Database Connection 
+var pool = mysql.createPool({
+  host : DB_HOST,
+  user : DB_USERNAME,
+  password : DB_PASSWORD,
+  database : DB_NAME,
+  connectionLimit : 10
+  //port : 8889
+});
 
 function getTokensFromWix (authCode) {
   return axios.post(`${AUTH_PROVIDER_BASE_URL}/access`, {
@@ -108,7 +119,6 @@ app.get('/login',async (req, res) => {
     console.log("=============================");
 
     // need to post https://www.wix.com/app-oauth-installation/token-received to notif wix that we finished getting the token
-
     res.render('login', {  title: 'Wix Application', 
                               app_id: APP_ID,
                               site_display_name: instance.site.siteDisplayName,
@@ -116,6 +126,13 @@ app.get('/login',async (req, res) => {
                               permissions: instance.instance.permissions, 
                               token: refreshToken,
                               response: JSON.stringify(instance, null, '\t')});
+
+    var sql = `INSERT INTO appInfo (id, refreshToken, siteDisplayName) VALUES (${instance.instance.instanceId}, ${refreshToken}, ${instance.site.siteDisplayName})`;
+    pool.query(sql, function(err, result){
+      if(err) throw err;
+      console.log('Record inserted into appInfo Table');
+    });    
+
   } catch (wixError) {
     console.log("Error getting token from Wix");
     console.log({wixError});
@@ -140,47 +157,6 @@ app.get('/instance',async (req, res) => {
                               site_display_name: instance.site.siteDisplayName,
                               instance_id: instance.instance.instanceId, 
                               response: JSON.stringify(instance, null, '\t')});
-  } catch (wixError) {
-    console.log("Error getting token from Wix");
-    console.log({wixError});
-    res.status(500);
-    return;
-  }
-});
-
-app.get('/products',async (req, res) => {
-  
-  const refreshToken = req.query.token;
-
-  console.log("refreshToken = " + refreshToken);
-
-  try {
-    out = await getProducts(refreshToken);
-    storeProducts = out.response;
-    
-    if (storeProducts) {
-      
-      res.render('products', {  title: 'Wix Application', 
-                              app_id: APP_ID,
-                              total: storeProducts.totalResults,
-                              response: JSON.stringify(storeProducts.products, null, "\t")});
-    } else {
-      var message;
-      switch (out.code) {
-        case 401: 
-          message = `Got 401 - Are you sure you have a Wix Store in your site?`;
-          break;
-        case 403: 
-          message = `Got 403 - No Permissions for Stores. You can add permissions to your application in <a href="https://dev.wix.com/dc3/my-apps/${APP_ID}/workspace/permissions">Wix Developers</a>.`;
-          break;
-        case 404: 
-          message = 'Got 404 - Check your api route';
-          break;
-        default:
-        message = `Got ${out.code}`;
-      }  
-      res.status(200).send(`<html><body><pre>${message}</pre></body></html>`);
-    }
   } catch (wixError) {
     console.log("Error getting token from Wix");
     console.log({wixError});
@@ -229,46 +205,6 @@ app.get('/orders',async (req, res) => {
   }
 });
 
-app.get('/payments',async (req, res) => {
-  
-  const refreshToken = req.query.token;
-
-  console.log("refreshToken = " + refreshToken);
-
-  try {
-    out =  await getPayments(refreshToken);
-    transactions = out.response;
-
-    if (transactions) {
-      res.render('payments', {  title: 'Wix Application', 
-                              app_id: APP_ID,
-                              total: transactions.pagination.total,
-                              response: JSON.stringify(transactions, null, "\t")});
-    } else {
-      var message;
-      switch (out.code) {
-        case 403: 
-          message = `Got 403 - No Permissions for payments. You can add permissions to your application in <a href="https://dev.wix.com/dc3/my-apps/${APP_ID}/workspace/permissions">Wix Developers</a>.`;
-          break;
-        case 404: 
-          message = 'Got 404 - Check your api route';
-          break;
-        default:
-        message = `Got ${out.code}`;
-      }  
-      res.status(200).send(`<html><body><pre>${message}</pre></body></html>`);
-    }
-  } catch (wixError) {
-    console.log({wixError});
-    res.status(500);
-  }
-});
-
-app.get('/webhooks',async (req, res) => {
-  res.render('webhooks', {  title: 'Wix Application', 
-                            app_id: APP_ID, 
-                            webhooks: JSON.stringify(incomingWebhooks, null, 2)});
-});
 
 // this is sample call to Wix instance API - you can find it here: https://dev.wix.com/api/app-management.app-instance.html#get-app-instance
 async function getAppInstance(refreshToken)
@@ -302,33 +238,6 @@ async function getAppInstance(refreshToken)
   }
 };
 
-// This is a sample call to the Wix Product API - you can find it here: https://dev.wix.com/api/wix-stores.stores-catalog.html#query-products
-async function getProducts(refreshToken)
-{
-  try {
-    const {access_token} = await getAccessToken(refreshToken);
-    const body = {
-      // *** PUT YOUR PARAMS HERE ***
-    };
-    const options = {
-      headers: {
-        authorization: access_token,
-      },
-    };
-    const appInstance = axios.create({
-      baseURL: STORE_CATALOG_API_URL,
-      headers: {authorization: access_token}
-    });
-
-    const response = (await appInstance.post('products/query', body)).data;
-    console.log(response);
-    return {response: response, code: 200};
-  } catch (e) {
-    console.log({e});
-    return {code: e.response.status};
-  }
-};
-
 // This is sample call to the Wix Orders API - you can find it here: https://dev.wix.com/api/wix-stores.stores-orders.html#query-orders
 async function getOrders(refreshToken)
 {
@@ -348,32 +257,6 @@ async function getOrders(refreshToken)
     });
 
     const response = (await appInstance.post('orders/query', body)).data;
-    return {response: response, code: 200};
-  } catch (e) {
-    console.log({e});
-    return {code: e.response.status};
-  }
-};
-
-// This is a sample call to the Wix Payments API - you can find it here: https://dev.wix.com/api/wix-payments.payments.html#transactions-list
-async function getPayments(refreshToken)
-{
-  try {
-    const {access_token} = await getAccessToken(refreshToken);
-    const body = {
-      // *** PUT YOUR PARAMS HERE ***
-    };
-    const options = {
-      headers: {
-        authorization: access_token,
-      },
-    };
-    const appInstance = axios.create({
-      baseURL: PAYMENTS_API_URL,
-      headers: {authorization: access_token}
-    });
-
-    const response = (await appInstance.get('/transactions', body)).data;
     return {response: response, code: 200};
   } catch (e) {
     console.log({e});
