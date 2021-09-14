@@ -6,6 +6,7 @@ const path = require('path');
 const config = require('./config');
 const credentials = require('./credentials');
 const mysql = require('mysql');
+const e = require('express');
 
 const APP_ID = config.APP_ID;
 const APP_SECRET = credentials.APP_SECRET;
@@ -15,6 +16,13 @@ const INSTANCE_API_URL = 'https://www.wixapis.com/apps/v1';
 const STORE_CATALOG_API_URL = 'https://www.wixapis.com/stores/v1';
 const STORE_ORDERS_API_URL = 'https://www.wixapis.com/stores/v2';
 const PAYMENTS_API_URL = 'https://cashier.wix.com/_api/payment-services-web/merchant/v2';
+const ABANDONED_CART_API_URL = 'https://www.wixapis.com/stores/v1/abandonedCarts/';
+
+
+const DB_HOST = config.DB_HOST;
+const DB_USERNAME = config.DB_USERNAME;
+const DB_PASSWORD = config.DB_PASSWORD;
+const DB_NAME = config.DB_NAME;
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -118,6 +126,12 @@ app.get('/login',async (req, res) => {
     console.log(`User's site instanceId: ${instance.instance.instanceId}`);
     console.log("=============================");
 
+    var sql = `INSERT INTO appInfo (id, refreshToken, siteDisplayName) VALUES ('${instance.instance.instanceId}', '${refreshToken}', '${instance.site.siteDisplayName}')`;
+    pool.query(sql, function(err, result){
+      if(err) throw err;
+      console.log('Record inserted into appInfo Table');
+    });
+
     // need to post https://www.wix.com/app-oauth-installation/token-received to notif wix that we finished getting the token
     res.render('login', {  title: 'Wix Application', 
                               app_id: APP_ID,
@@ -125,13 +139,7 @@ app.get('/login',async (req, res) => {
                               instance_id: instance.instance.instanceId, 
                               permissions: instance.instance.permissions, 
                               token: refreshToken,
-                              response: JSON.stringify(instance, null, '\t')});
-
-    var sql = `INSERT INTO appInfo (id, refreshToken, siteDisplayName) VALUES (${instance.instance.instanceId}, ${refreshToken}, ${instance.site.siteDisplayName})`;
-    pool.query(sql, function(err, result){
-      if(err) throw err;
-      console.log('Record inserted into appInfo Table');
-    });    
+                              response: JSON.stringify(instance, null, '\t')});    
 
   } catch (wixError) {
     console.log("Error getting token from Wix");
@@ -167,13 +175,45 @@ app.get('/instance',async (req, res) => {
 
 app.get('/orders',async (req, res) => {
   
+  console.log(req.query);
   const refreshToken = req.query.token;
-
   console.log("refreshToken = " + refreshToken);
 
   try {
-    out = await getOrders(refreshToken);  
+    //Get all the order information
+    out = await getOrders(refreshToken);
     storeOrders = out.response;
+    totalOrders = storeOrders.totalResults;
+    console.log(totalOrders);
+
+    //Get all the Abandoned Cart Information 
+    abandonedCart = await getAbandonedCarts(refreshToken);
+    abandonedCartList = abandonedCart.response;
+    totalAbandonedCarts = abandonedCartList.totalResults;
+    console.log(totalAbandonedCarts);
+
+    instance = await getAppInstance(refreshToken);
+    instanceId = instance.instance.instanceId;
+
+    //Check if the database entry has already been made 
+    var orderSql = `SELECT COUNT(*) AS isPresent FROM orderSummary WHERE instanceId = ${instanceId}`;
+    pool.query(orderSql, function(err, result){
+      if (err) throw err;
+      if(isPresent === 1){
+        var sql = `UPDATE orderSummary SET (instanceId, totalOrders, totalAbandonedCarts) VALUES ('${instanceId}', ${totalOrders}, ${totalAbandonedCarts})`;
+        pool.query(sql, function(err, result){
+          if(err) throw err;
+          console.log('Record Updated !')
+        })
+      }
+      else {
+        var sql = `INSERT INTO orderSummary (instanceId, totalOrders, totalAbandonedCarts) VALUES ('${instanceId}', ${totalOrders}, ${totalAbandonedCarts})`;
+        pool.query(sql, function(err, result){
+          if(err) throw err;
+          console.log('Record inserted into Order Summary !');
+        });
+      }
+    });
 
     if (storeOrders) {
       res.render('orders', {  title: 'Wix Application', 
@@ -217,7 +257,6 @@ async function getAppInstance(refreshToken)
 
     const body = {
       // *** PUT YOUR PARAMS HERE ***
-      //query: {limit: 10},
     };
     const options = {
       headers: {
@@ -245,6 +284,8 @@ async function getOrders(refreshToken)
     const {access_token} = await getAccessToken(refreshToken);
     const body = {
       // *** PUT YOUR PARAMS HERE ***
+      "query" : {"limit" : 10},
+      "sort": "[{\"number\": \"desc\"}]"
     };
     const options = {
       headers: {
@@ -263,5 +304,33 @@ async function getOrders(refreshToken)
     return {code: e.response.status};
   }
 };
+
+//Get the total number of Abandoned Carts 
+async function getAbandonedCarts(refreshToken)
+{
+  try {
+    const {access_token} =  await getAccessToken(refreshToken);
+    const body = {
+      // *** PUT YOUR PARAMS HERE ***
+      "query" : {"limit" : 10},
+      "sort": "[{\"number\": \"desc\"}]"
+    };
+    const options = {
+      headers: {
+        authorization: access_token,
+      },
+    };
+    const appInstance = axios.create({
+      baseURL: ABANDONED_CART_API_URL,
+      headers: {authorization: access_token}
+    });
+
+    const response = (await appInstance.post('/query', body)).data;
+    return {response : response, code: 200};
+  } catch (error) {
+    console.log({e});
+    return {code: e.response.status};
+  }
+}
 
 app.listen(port, () => console.log(`My Wix Application ${APP_ID} is listening on port ${port}!`));

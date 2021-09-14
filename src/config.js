@@ -12,5 +12,17 @@ wJDHEqiVWY6HxYOCX0vxwiK7DUhYJKsEwJAZQJwI+E81AnCpBF27Ou1yMhFk/fMN
 WwIDAQAB
 -----END PUBLIC KEY-----`;
 
+//Get the Database Connection Details
+const DB_HOST = 'localhost';
+const DB_USERNAME = 'root';
+const DB_PASSWORD = '';
+const DB_NAME = 'santheReviews';
+
 exports.APP_ID = APP_ID;
 exports.PUBLIC_KEY = PUBLIC_KEY;
+
+exports.DB_HOST = DB_HOST;
+exports.DB_USERNAME = DB_USERNAME;
+exports.DB_PASSWORD = DB_PASSWORD;
+exports.DB_NAME = DB_NAME;
+
