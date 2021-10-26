@@ -130,10 +130,9 @@ app.get('/login',async (req, res) => {
   }});
 
 app.get('/', (_, res) => {
-
   res.render('index', {
     businessName: businessName
-  })
+  });
 });
   
 // this is sample call to Wix instance API - you can find it here: https://dev.wix.com/api/app-management.app-instance.html#get-app-instance
@@ -182,6 +181,14 @@ app.get('/orders',async (req, res) => {
     res.status(500);
     return;
   }
+});
+
+//Customer facing dashboard to be integrated.
+app.get('/:businessname', async function(req, res) {
+  console.log(req.params.businessname)
+  res.render('./customer/customerIndex',{
+    businessName : req.params.businessname
+  });
 });
 
 app.listen(port, () => console.log(`My Wix Application ${APP_ID} is listening on port ${port}!`));
